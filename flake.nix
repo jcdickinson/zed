@@ -3,59 +3,59 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
-    fenix = {
+    nixfenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    flake-compat.url = "github:edolstra/flake-compat";
   };
 
   outputs = {
+    self,
     nixpkgs,
-    crane,
-    fenix,
-    ...
+    nixfenix,
   }: let
-    forAllSystems = function:
-      nixpkgs.lib.genAttrs [
-        "x86_64-linux"
-        "aarch64-linux"
-      ] (system:
-        function (import nixpkgs {
-          inherit system;
-          overlays = [fenix.overlays.default];
-        }));
+    inherit (self) outputs;
+    systems = [
+      "aarch64-linux"
+      "x86_64-linux"
+      "aarch64-darwin"
+      "x86_64-darwin"
+    ];
+    forAllSystems = nixpkgs.lib.genAttrs systems;
   in {
-    packages = forAllSystems (pkgs: let
-      craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.fenix.stable.toolchain);
-      rustPlatform = pkgs.makeRustPlatform {
-        inherit (pkgs.fenix.stable.toolchain) cargo rustc;
-      };
-      nightlyBuild = pkgs.callPackage ./nix/build.nix {
-        inherit craneLib rustPlatform;
-      };
-    in {
-      zed-editor = nightlyBuild;
-      default = nightlyBuild;
-    });
+    formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.alejandra);
 
-    devShells = forAllSystems (pkgs: {
-      default = import ./nix/shell.nix {inherit pkgs;};
-    });
-
-    formatter = forAllSystems (pkgs: pkgs.alejandra);
-
-    overlays.default = final: prev: {
-      zed-editor = final.callPackage ./nix/build.nix {
-        craneLib = (crane.mkLib final).overrideToolchain (p: p.fenix.stable.toolchain);
-        rustPlatform = final.makeRustPlatform {
-          inherit (final.fenix.stable.toolchain) cargo rustc;
+    devShells = forAllSystems (
+      system: let
+        pkgs = import nixpkgs {inherit system;};
+        fenix = nixfenix.packages.${system};
+        rust-toolchain = (pkgs.lib.importTOML ./rust-toolchain.toml).toolchain;
+        complete-toolchain = fenix.fromToolchainName {
+          name = rust-toolchain.channel;
+          sha256 = "sha256-6eN/GKzjVSjEhGO9FhWObkRFaE1Jf+uqMSdQnb8lcB4=";
         };
-      };
-    };
+        toolchain = complete-toolchain.withComponents (rust-toolchain.components
+          ++ [
+            "cargo"
+            "rust-src"
+            "rust-analyzer"
+            "clippy"
+          ]);
+      in rec
+      {
+        default = import ./shell.nix {inherit pkgs;};
+
+        # Usage, either:
+        #   a: `nix develop .#with-toolchain`
+        #   b: `echo "use flake .#with-toolchain" > .envrc`
+        with-toolchain = default.overrideAttrs (old: {
+          nativeBuildInputs =
+            old.nativeBuildInputs
+            ++ [
+              toolchain
+            ];
+        });
+      }
+    );
   };
 }
