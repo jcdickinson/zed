@@ -4,10 +4,10 @@ use crate::{
     LanguageModelName, LanguageModelProviderId, LanguageModelProviderName,
     LanguageModelProviderState, LanguageModelRequest, RateLimiter, ZedModel,
 };
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use client::{Client, PerformCompletionParams, UserStore, EXPIRED_LLM_TOKEN_HEADER_NAME};
 use collections::BTreeMap;
-use feature_flags::{FeatureFlag, FeatureFlagAppExt};
+use feature_flags::{FeatureFlag, FeatureFlagAppExt, LanguageModels};
 use futures::{future::BoxFuture, stream::BoxStream, AsyncBufReadExt, FutureExt, StreamExt};
 use gpui::{AnyView, AppContext, AsyncAppContext, Model, ModelContext, Subscription, Task};
 use http_client::{AsyncBody, HttpClient, Method, Response};
@@ -142,46 +142,56 @@ impl LanguageModelProvider for CloudLanguageModelProvider {
     fn provided_models(&self, cx: &AppContext) -> Vec<Arc<dyn LanguageModel>> {
         let mut models = BTreeMap::default();
 
-        for model in anthropic::Model::iter() {
-            if !matches!(model, anthropic::Model::Custom { .. }) {
-                models.insert(model.id().to_string(), CloudModel::Anthropic(model));
+        let is_user = !cx.has_flag::<LanguageModels>();
+        if is_user {
+            models.insert(
+                anthropic::Model::Claude3_5Sonnet.id().to_string(),
+                CloudModel::Anthropic(anthropic::Model::Claude3_5Sonnet),
+            );
+        } else {
+            for model in anthropic::Model::iter() {
+                if !matches!(model, anthropic::Model::Custom { .. }) {
+                    models.insert(model.id().to_string(), CloudModel::Anthropic(model));
+                }
             }
-        }
-        for model in open_ai::Model::iter() {
-            if !matches!(model, open_ai::Model::Custom { .. }) {
-                models.insert(model.id().to_string(), CloudModel::OpenAi(model));
+            for model in open_ai::Model::iter() {
+                if !matches!(model, open_ai::Model::Custom { .. }) {
+                    models.insert(model.id().to_string(), CloudModel::OpenAi(model));
+                }
             }
-        }
-        for model in google_ai::Model::iter() {
-            if !matches!(model, google_ai::Model::Custom { .. }) {
-                models.insert(model.id().to_string(), CloudModel::Google(model));
+            for model in google_ai::Model::iter() {
+                if !matches!(model, google_ai::Model::Custom { .. }) {
+                    models.insert(model.id().to_string(), CloudModel::Google(model));
+                }
             }
-        }
-        for model in ZedModel::iter() {
-            models.insert(model.id().to_string(), CloudModel::Zed(model));
-        }
+            for model in ZedModel::iter() {
+                models.insert(model.id().to_string(), CloudModel::Zed(model));
+            }
 
-        // Override with available models from settings
-        for model in &AllLanguageModelSettings::get_global(cx)
-            .zed_dot_dev
-            .available_models
-        {
-            let model = match model.provider {
-                AvailableProvider::Anthropic => CloudModel::Anthropic(anthropic::Model::Custom {
-                    name: model.name.clone(),
-                    max_tokens: model.max_tokens,
-                    tool_override: model.tool_override.clone(),
-                }),
-                AvailableProvider::OpenAi => CloudModel::OpenAi(open_ai::Model::Custom {
-                    name: model.name.clone(),
-                    max_tokens: model.max_tokens,
-                }),
-                AvailableProvider::Google => CloudModel::Google(google_ai::Model::Custom {
-                    name: model.name.clone(),
-                    max_tokens: model.max_tokens,
-                }),
-            };
-            models.insert(model.id().to_string(), model.clone());
+            // Override with available models from settings
+            for model in &AllLanguageModelSettings::get_global(cx)
+                .zed_dot_dev
+                .available_models
+            {
+                let model = match model.provider {
+                    AvailableProvider::Anthropic => {
+                        CloudModel::Anthropic(anthropic::Model::Custom {
+                            name: model.name.clone(),
+                            max_tokens: model.max_tokens,
+                            tool_override: model.tool_override.clone(),
+                        })
+                    }
+                    AvailableProvider::OpenAi => CloudModel::OpenAi(open_ai::Model::Custom {
+                        name: model.name.clone(),
+                        max_tokens: model.max_tokens,
+                    }),
+                    AvailableProvider::Google => CloudModel::Google(google_ai::Model::Custom {
+                        name: model.name.clone(),
+                        max_tokens: model.max_tokens,
+                    }),
+                };
+                models.insert(model.id().to_string(), model.clone());
+            }
         }
 
         models
@@ -624,14 +634,143 @@ impl LanguageModel for CloudLanguageModel {
                     })
                     .boxed()
             }
-            CloudModel::OpenAi(_) => {
-                future::ready(Err(anyhow!("tool use not implemented for OpenAI"))).boxed()
+            CloudModel::OpenAi(model) => {
+                let mut request = request.into_open_ai(model.id().into());
+                let client = self.client.clone();
+                let mut function = open_ai::FunctionDefinition {
+                    name: tool_name.clone(),
+                    description: None,
+                    parameters: None,
+                };
+                let func = open_ai::ToolDefinition::Function {
+                    function: function.clone(),
+                };
+                request.tool_choice = Some(open_ai::ToolChoice::Other(func.clone()));
+                // Fill in description and params separately, as they're not needed for tool_choice field.
+                function.description = Some(tool_description);
+                function.parameters = Some(input_schema);
+                request.tools = vec![open_ai::ToolDefinition::Function { function }];
+                self.request_limiter
+                    .run(async move {
+                        let request = serde_json::to_string(&request)?;
+                        let response = client
+                            .request_stream(proto::StreamCompleteWithLanguageModel {
+                                provider: proto::LanguageModelProvider::OpenAi as i32,
+                                request,
+                            })
+                            .await?;
+                        // Call arguments are gonna be streamed in over multiple chunks.
+                        let mut load_state = None;
+                        let mut response = response.map(
+                            |item: Result<
+                                proto::StreamCompleteWithLanguageModelResponse,
+                                anyhow::Error,
+                            >| {
+                                Result::<open_ai::ResponseStreamEvent, anyhow::Error>::Ok(
+                                    serde_json::from_str(&item?.event)?,
+                                )
+                            },
+                        );
+                        while let Some(Ok(part)) = response.next().await {
+                            for choice in part.choices {
+                                let Some(tool_calls) = choice.delta.tool_calls else {
+                                    continue;
+                                };
+
+                                for call in tool_calls {
+                                    if let Some(func) = call.function {
+                                        if func.name.as_deref() == Some(tool_name.as_str()) {
+                                            load_state = Some((String::default(), call.index));
+                                        }
+                                        if let Some((arguments, (output, index))) =
+                                            func.arguments.zip(load_state.as_mut())
+                                        {
+                                            if call.index == *index {
+                                                output.push_str(&arguments);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some((arguments, _)) = load_state {
+                            return Ok(serde_json::from_str(&arguments)?);
+                        } else {
+                            bail!("tool not used");
+                        }
+                    })
+                    .boxed()
             }
             CloudModel::Google(_) => {
                 future::ready(Err(anyhow!("tool use not implemented for Google AI"))).boxed()
             }
-            CloudModel::Zed(_) => {
-                future::ready(Err(anyhow!("tool use not implemented for Zed models"))).boxed()
+            CloudModel::Zed(model) => {
+                // All Zed models are OpenAI-based at the time of writing.
+                let mut request = request.into_open_ai(model.id().into());
+                let client = self.client.clone();
+                let mut function = open_ai::FunctionDefinition {
+                    name: tool_name.clone(),
+                    description: None,
+                    parameters: None,
+                };
+                let func = open_ai::ToolDefinition::Function {
+                    function: function.clone(),
+                };
+                request.tool_choice = Some(open_ai::ToolChoice::Other(func.clone()));
+                // Fill in description and params separately, as they're not needed for tool_choice field.
+                function.description = Some(tool_description);
+                function.parameters = Some(input_schema);
+                request.tools = vec![open_ai::ToolDefinition::Function { function }];
+                self.request_limiter
+                    .run(async move {
+                        let request = serde_json::to_string(&request)?;
+                        let response = client
+                            .request_stream(proto::StreamCompleteWithLanguageModel {
+                                provider: proto::LanguageModelProvider::OpenAi as i32,
+                                request,
+                            })
+                            .await?;
+                        // Call arguments are gonna be streamed in over multiple chunks.
+                        let mut load_state = None;
+                        let mut response = response.map(
+                            |item: Result<
+                                proto::StreamCompleteWithLanguageModelResponse,
+                                anyhow::Error,
+                            >| {
+                                Result::<open_ai::ResponseStreamEvent, anyhow::Error>::Ok(
+                                    serde_json::from_str(&item?.event)?,
+                                )
+                            },
+                        );
+                        while let Some(Ok(part)) = response.next().await {
+                            for choice in part.choices {
+                                let Some(tool_calls) = choice.delta.tool_calls else {
+                                    continue;
+                                };
+
+                                for call in tool_calls {
+                                    if let Some(func) = call.function {
+                                        if func.name.as_deref() == Some(tool_name.as_str()) {
+                                            load_state = Some((String::default(), call.index));
+                                        }
+                                        if let Some((arguments, (output, index))) =
+                                            func.arguments.zip(load_state.as_mut())
+                                        {
+                                            if call.index == *index {
+                                                output.push_str(&arguments);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some((arguments, _)) = load_state {
+                            return Ok(serde_json::from_str(&arguments)?);
+                        } else {
+                            bail!("tool not used");
+                        }
+                    })
+                    .boxed()
             }
         }
     }
