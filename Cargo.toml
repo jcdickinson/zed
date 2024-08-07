@@ -512,12 +512,9 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
-
 [patch.crates-io]
 # Patch Tree-sitter for updated wasmtime.
 tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "7f4a57817d58a2f134fe863674acad6bbf007228" }
-fontdb = { git = "https://github.com/jcdickinson/fontdb", rev = "966f91767ec16ab2f0663148c8df5494fdb95c9d" }
-# fontdb = { path = "../fontdb" }
 
 [profile.dev]
 split-debuginfo = "unpacked"
@@ -545,18 +542,6 @@ zed = { codegen-units = 16 }
 inherits = "release"
 lto = false
 codegen-units = 16
-
-# Comment these out if you are working on macros.
-[profile.dev.build-override]
-opt-level = 3
-codegen-units = 1
-incremental = false
-
-[profile.release.build-override]
-opt-level = 3
-codegen-units = 1
-debug = false
-incremental = false
 
 [workspace.lints.clippy]
 dbg_macro = "deny"
