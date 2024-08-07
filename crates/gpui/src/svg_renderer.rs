@@ -60,9 +60,10 @@ impl SvgRenderer {
         let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width.into(), size.height.into())
             .ok_or(usvg::Error::InvalidSize)?;
 
-        let transform = tree.view_box().to_transform(
-            resvg::tiny_skia::Size::from_wh(size.width.0 as f32, size.height.0 as f32)
-                .ok_or(usvg::Error::InvalidSize)?,
+        let tree_size = tree.size();
+        let transform = usvg::Transform::from_scale(
+            size.width.0 as f32 / tree_size.width(),
+            size.height.0 as f32 / tree_size.height(),
         );
 
         resvg::render(&tree, transform, &mut pixmap.as_mut());

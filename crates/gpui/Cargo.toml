@@ -56,8 +56,8 @@ profiling.workspace = true
 rand.workspace = true
 raw-window-handle = "0.6"
 refineable.workspace = true
-resvg = { version = "0.41.0", default-features = false }
-usvg = { version = "0.41.0", default-features = false }
+resvg = { git = "https://github.com/jcdickinson/resvg", rev="fb9e980d0ef163ce891d1308af46c6f9f02ffb1f", default-features = false }
+usvg = { git = "https://github.com/jcdickinson/resvg", rev="fb9e980d0ef163ce891d1308af46c6f9f02ffb1f", default-features = false }
 schemars.workspace = true
 seahash = "4.1"
 semantic_version.workspace = true
@@ -108,7 +108,7 @@ blade-graphics.workspace = true
 blade-macros.workspace = true
 blade-util.workspace = true
 bytemuck = "1"
-cosmic-text = { git = "https://github.com/pop-os/cosmic-text", rev = "542b20c" }
+cosmic-text = { git = "https://github.com/jcdickinson/cosmic-text", rev = "96e5c8e3bef6c0e07e0ee9bba7b8dce99cb0cb42" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 as-raw-xcb-connection = "1"
