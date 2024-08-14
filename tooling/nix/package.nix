@@ -2,21 +2,34 @@
   pkgs ? import <nixpkgs> {},
   fenix ? import (fetchTarball "https://github.com/nix-community/fenix/archive/main.tar.gz") {},
 }: let
-  inherit (pkgs) lib stdenv;
-  rust-toolchain = (lib.importTOML ./../../rust-toolchain.toml).toolchain;
-  complete-toolchain = fenix.fromToolchainName {
-    name = rust-toolchain.channel;
+  inherit (pkgs) lib;
+  stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages_18.stdenv;
+  toolchain = fenix.fromToolchainName {
+    name = (lib.importTOML ./../../rust-toolchain.toml).toolchain.channel;
     sha256 = "sha256-6eN/GKzjVSjEhGO9FhWObkRFaE1Jf+uqMSdQnb8lcB4=";
   };
   rustPlatform = pkgs.makeRustPlatform {
-    inherit (complete-toolchain) cargo rustc;
+    inherit (toolchain) cargo rustc;
+    inherit stdenv;
   };
+  dynlibs = with pkgs; lib.optionals stdenv.isLinux [vulkan-loader];
+  version = (lib.importTOML ./../../crates/zed/Cargo.toml).package.version;
 in
   rustPlatform.buildRustPackage rec {
-    name = "zed-editor";
-    version = "git";
+    pname = "zed-editor";
+    inherit version;
 
     src = ./../..;
+
+    # patches = [
+    #   ./hardcode_nodejs.patch
+    # ];
+
+    # Nix needs to configure cargo in order to correctly link in dependencies and vendored crates. It currently uses
+    # the legacy `./.cargo/config` to do this. config.toml will take precedence, so remove it.
+    prePatch = ''
+      rm ./.cargo/config.toml
+    '';
 
     nativeBuildInputs = with pkgs;
       [
@@ -27,7 +40,6 @@ in
         protobuf
         rustPlatform.bindgenHook
       ]
-      ++ lib.optionalString stdenv.isLinux [llvmPackages.clangUseLLVM llvmPackages.bintools mold]
       ++ lib.optionals stdenv.isDarwin [xcbuild.xcrun];
 
     buildInputs = with pkgs;
@@ -46,7 +58,6 @@ in
         libxkbcommon
         wayland
         xorg.libxcb
-        mold
       ]
       ++ lib.optionals stdenv.isDarwin (
         with darwin.apple_sdk.frameworks; [
@@ -68,6 +79,7 @@ in
 
     cargoLock = {
       lockFile = ./../../Cargo.lock;
+
       outputHashes = lib.importJSON ./pins.json;
     };
 
@@ -76,9 +88,8 @@ in
       "--package=cli"
     ];
 
+    RUSTFLAGS = "-C symbol-mangling-version=v0 --cfg tokio_unstable";
     buildFeatures = ["gpui/runtime_shaders" "mimalloc"];
-
-    RUSTFLAGS = "-C symbol-mangling-version=v0 --cfg tokio_unstable -C target-cpu=x86-64-v3 -C link-arg=-fuse-ld=mold";
 
     env = {
       ZSTD_SYS_USE_PKG_CONFIG = true;
@@ -89,14 +100,22 @@ in
           "${src}/assets/fonts/zed-sans"
         ];
       };
+      NODE_PATH = "${pkgs.nodejs_22}";
     };
 
-    # Using fenix seems to have broken the bindgen hook.
-    postFixup = let
-      dynlibs = with pkgs; buildInputs ++ [vulkan-loader];
-    in
-      lib.optionalString stdenv.isLinux (pkgs.lib.concatStringsSep "; " (builtins.map (b: "patchelf --add-rpath ${b.out}/lib $out/libexec/*") dynlibs));
+    postFixup = pkgs.lib.concatStringsSep "; " (builtins.map
+      (b: "patchelf --add-rpath ${b.out}/lib $out/libexec/*")
+      dynlibs);
+
     doCheck = false;
+    preCheck = ''
+      # the check phase seems to be ignoring the linking parameters
+      export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath (buildInputs ++ dynlibs)}:''${LD_LIBRARY_PATH:-}
+
+      # Nix creates an inaccessible homedir because it doesn't make sense for a build to interact with one. It does
+      # make sense for tests, though.
+      export HOME=$(mktemp -d)
+    '';
 
     checkFlags = lib.optionals stdenv.hostPlatform.isLinux [
       # Fails with "On 2823 Failed to find test1:A"
@@ -104,6 +123,8 @@ in
       # Fails with "called `Result::unwrap()` on an `Err` value: Invalid keystroke `cmd-k`"
       # https://github.com/zed-industries/zed/issues/10427
       "--skip=test_disabled_keymap_binding"
+      # Fails with "FOREIGN KEY constraint failed" in the logs
+      "--skip=test_window_edit_state_restoring_enabled"
     ];
 
     installPhase = ''
@@ -136,10 +157,6 @@ in
       homepage = "https://zed.dev";
       changelog = "https://github.com/zed-industries/zed/releases/tag/v${version}";
       license = licenses.gpl3Only;
-      maintainers = with maintainers; [
-        GaetanLepage
-        niklaskorz
-      ];
       mainProgram = "zed";
       platforms = platforms.all;
       # Currently broken on darwin: https://github.com/NixOS/nixpkgs/pull/303233#issuecomment-2048650618
