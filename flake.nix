@@ -43,7 +43,7 @@
         rust-toolchain = (pkgs.lib.importTOML ./rust-toolchain.toml).toolchain;
         complete-toolchain = fenix.fromToolchainName {
           name = rust-toolchain.channel;
-          sha256 = "sha256-6eN/GKzjVSjEhGO9FhWObkRFaE1Jf+uqMSdQnb8lcB4=";
+          sha256 = "sha256-VZZnlyP69+Y3crrLHQyJirqlHrTtGTsyiSnZB8jEvVo=";
         };
         toolchain = complete-toolchain.withComponents (rust-toolchain.components
           ++ [

@@ -6,7 +6,7 @@
   stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages_18.stdenv;
   toolchain = fenix.fromToolchainName {
     name = (lib.importTOML ./../../rust-toolchain.toml).toolchain.channel;
-    sha256 = "sha256-6eN/GKzjVSjEhGO9FhWObkRFaE1Jf+uqMSdQnb8lcB4=";
+    sha256 = "sha256-VZZnlyP69+Y3crrLHQyJirqlHrTtGTsyiSnZB8jEvVo=";
   };
   rustPlatform = pkgs.makeRustPlatform {
     inherit (toolchain) cargo rustc;
@@ -105,7 +105,7 @@ in
 
     postFixup = pkgs.lib.concatStringsSep "; " (builtins.map
       (b: "patchelf --add-rpath ${b.out}/lib $out/libexec/*")
-      dynlibs);
+      (buildInputs ++ dynlibs));
 
     doCheck = false;
     preCheck = ''
