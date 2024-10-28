@@ -626,10 +626,11 @@ features = [
     "Win32_UI_WindowsAndMessaging",
 ]
 
-# TODO livekit https://github.com/RustAudio/cpal/pull/891
 [patch.crates-io]
+# TODO livekit https://github.com/RustAudio/cpal/pull/891
 cpal = { git = "https://github.com/zed-industries/cpal", rev = "fd8bc2fd39f1f5fdee5a0690656caff9a26d9d50" }
 real-async-tls = { git = "https://github.com/zed-industries/async-tls", rev = "1e759a4b5e370f87dc15e40756ac4f8815b61d9d", package = "async-tls"}
+fontdb = { git = "https://github.com/jcdickinson/fontdb", branch = "0-18-backport" }
 
 [profile.dev]
 split-debuginfo = "unpacked"
