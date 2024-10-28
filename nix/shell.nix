@@ -32,6 +32,7 @@ in
         pkg-config
         protobuf
         rustPlatform.bindgenHook
+        rust-analyzer
       ];
 
       inherit buildInputs;

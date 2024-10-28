@@ -7,7 +7,7 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    crane.url = "github:ipetkov/crane";
+    crane.url = "github:ipetkov/crane/v0.19.1";
     flake-compat.url = "github:edolstra/flake-compat";
   };
 
@@ -22,7 +22,12 @@
     overlays = {
       fenix = fenix.overlays.default;
       rust-toolchain = final: prev: {
-        rustToolchain = final.fenix.stable.toolchain;
+        rustToolchain = final.fenix.stable.withComponents [
+          "rustc"
+          "cargo"
+          "clippy"
+          "rustfmt"
+        ];
       };
       zed-editor = final: prev: {
         zed-editor = final.callPackage ./nix/build.nix {

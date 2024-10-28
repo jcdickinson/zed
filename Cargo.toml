@@ -663,3 +663,6 @@ should_implement_trait = { level = "allow" }
 
 [workspace.metadata.cargo-machete]
 ignored = ["bindgen", "cbindgen", "prost_build", "serde"]
+
+[patch.crates-io]
+fontdb = { git = "https://github.com/jcdickinson/fontdb", branch = "0-18-backport" }
