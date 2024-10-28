@@ -50,6 +50,8 @@
     // {
       inherit src stdenv;
 
+      outputHashes = lib.importJSON ./pins.json;
+
       nativeBuildInputs = [
         clang
         copyDesktopItems
@@ -88,7 +90,12 @@
       ZED_UPDATE_EXPLANATION = "zed has been installed using nix. Auto-updates have thus been disabled.";
     };
 
-  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+  cargoArtifacts =
+    craneLib.buildDepsOnly commonArgs
+    // {
+      # Build results from this don't seem to be used
+      cargoBuildCommand = "";
+    };
 
   gpu-lib =
     if withGLES
