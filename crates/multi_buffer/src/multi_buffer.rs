@@ -10,10 +10,10 @@ use itertools::Itertools;
 use language::{
     language_settings::{language_settings, LanguageSettings},
     AutoindentMode, Buffer, BufferChunks, BufferRow, BufferSnapshot, Capability, CharClassifier,
-    CharKind, Chunk, CursorShape, DiagnosticEntry, DiskState, File, IndentGuide, IndentSize,
-    Language, LanguageScope, OffsetRangeExt, OffsetUtf16, Outline, OutlineItem, Point, PointUtf16,
-    Selection, TextDimension, ToOffset as _, ToOffsetUtf16 as _, ToPoint as _, ToPointUtf16 as _,
-    TransactionId, Unclipped,
+    CharKind, Chunk, ContextItem, CursorShape, DiagnosticEntry, DiskState, File, IndentGuide,
+    IndentSize, Language, LanguageScope, OffsetRangeExt, OffsetUtf16, Outline, OutlineItem, Point,
+    PointUtf16, Selection, TextDimension, ToOffset as _, ToOffsetUtf16 as _, ToPoint as _,
+    ToPointUtf16 as _, TransactionId, Unclipped,
 };
 use smallvec::SmallVec;
 use std::{
@@ -3933,6 +3933,28 @@ impl MultiBufferSnapshot {
                     })
                 })
                 .collect(),
+        ))
+    }
+
+    pub fn contexts_contained_by<T: ToOffset>(
+        &self,
+        offset: Range<T>,
+    ) -> Option<(&BufferSnapshot, Vec<ContextItem<Point>>)> {
+        let start = self.anchor_before(offset.start);
+        let end = self.anchor_before(offset.end);
+
+        // This really shouldn't happen
+        if start.excerpt_id != end.excerpt_id {
+            return None;
+        }
+
+        let excerpt_id = start.excerpt_id;
+        let excerpt = self.excerpt(excerpt_id)?;
+        Some((
+            &excerpt.buffer,
+            excerpt
+                .buffer
+                .contexts_contained_by(start.text_anchor..end.text_anchor),
         ))
     }
 

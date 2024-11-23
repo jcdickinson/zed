@@ -7,6 +7,7 @@
 //!
 //! Notably we do *not* assign a single language to a single file; in real world a single file can consist of multiple programming languages - HTML is a good example of that - and `language` crate tends to reflect that status quo in its API.
 mod buffer;
+mod context;
 mod diagnostic_set;
 mod highlight_map;
 mod language_registry;
@@ -68,6 +69,7 @@ use util::serde::default_true;
 
 pub use buffer::Operation;
 pub use buffer::*;
+pub use context::*;
 pub use diagnostic_set::DiagnosticEntry;
 pub use language_registry::{
     AvailableLanguage, LanguageNotFound, LanguageQueries, LanguageRegistry,
@@ -834,6 +836,7 @@ pub struct Grammar {
     pub(crate) indents_config: Option<IndentConfig>,
     pub outline_config: Option<OutlineConfig>,
     pub embedding_config: Option<EmbeddingConfig>,
+    pub(crate) context_config: Option<ContextConfig>,
     pub(crate) injection_config: Option<InjectionConfig>,
     pub(crate) override_config: Option<OverrideConfig>,
     pub(crate) highlight_map: Mutex<HighlightMap>,
@@ -856,6 +859,15 @@ pub struct OutlineConfig {
     pub open_capture_ix: Option<u32>,
     pub close_capture_ix: Option<u32>,
     pub annotation_capture_ix: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct ContextConfig {
+    pub query: Query,
+    pub item_capture_ix: u32,
+    pub name_capture_ix: u32,
+    pub find_implementations_capture_ix: Option<u32>,
+    pub goto_definition_capture_ix: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -935,6 +947,7 @@ impl Language {
                     highlights_query: None,
                     brackets_config: None,
                     outline_config: None,
+                    context_config: None,
                     embedding_config: None,
                     indents_config: None,
                     injection_config: None,
@@ -981,6 +994,11 @@ impl Language {
             self = self
                 .with_outline_query(query.as_ref())
                 .context("Error loading outline query")?;
+        }
+        if let Some(query) = queries.context {
+            self = self
+                .with_context_query(query.as_ref())
+                .context("Error loading context query")?;
         }
         if let Some(query) = queries.embedding {
             self = self
@@ -1077,6 +1095,39 @@ impl Language {
                 open_capture_ix,
                 close_capture_ix,
                 annotation_capture_ix,
+            });
+        }
+        Ok(self)
+    }
+
+    pub fn with_context_query(mut self, source: &str) -> Result<Self> {
+        let grammar = self
+            .grammar_mut()
+            .ok_or_else(|| anyhow!("cannot mutate grammar"))?;
+        let query = Query::new(&grammar.ts_language, source)?;
+        let mut item_capture_ix = None;
+        let mut name_capture_ix = None;
+        let mut find_implementations_capture_ix = None;
+        let mut goto_definition_capture_ix = None;
+        get_capture_indices(
+            &query,
+            &mut [
+                ("item", &mut item_capture_ix),
+                ("name", &mut name_capture_ix),
+                (
+                    "context.find_implementations",
+                    &mut find_implementations_capture_ix,
+                ),
+                ("context.goto_definition", &mut goto_definition_capture_ix),
+            ],
+        );
+        if let Some((item_capture_ix, name_capture_ix)) = item_capture_ix.zip(name_capture_ix) {
+            grammar.context_config = Some(ContextConfig {
+                query,
+                item_capture_ix,
+                name_capture_ix,
+                find_implementations_capture_ix,
+                goto_definition_capture_ix,
             });
         }
         Ok(self)

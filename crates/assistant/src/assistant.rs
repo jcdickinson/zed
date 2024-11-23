@@ -48,8 +48,9 @@ use settings::{update_settings_file, Settings, SettingsStore};
 use slash_command::search_command::SearchSlashCommandFeatureFlag;
 use slash_command::{
     auto_command, cargo_workspace_command, default_command, delta_command, diagnostics_command,
-    docs_command, fetch_command, file_command, now_command, project_command, prompt_command,
-    search_command, selection_command, symbols_command, tab_command, terminal_command,
+    docs_command, fetch_command, file_command, lsp_discovery_command, now_command, project_command,
+    prompt_command, search_command, selection_command, symbols_command, tab_command,
+    terminal_command,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -352,6 +353,7 @@ fn register_slash_commands(prompt_builder: Option<Arc<PromptBuilder>>, cx: &mut 
     slash_command_registry.register_command(diagnostics_command::DiagnosticsSlashCommand, true);
     slash_command_registry.register_command(fetch_command::FetchSlashCommand, false);
     slash_command_registry.register_command(fetch_command::FetchSlashCommand, false);
+    slash_command_registry.register_command(lsp_discovery_command::LspDiscoveryCommand, false);
 
     if let Some(prompt_builder) = prompt_builder {
         cx.observe_flag::<project_command::ProjectSlashCommandFeatureFlag, _>({

@@ -436,6 +436,7 @@ impl LspCommand for PerformRename {
 }
 
 #[async_trait(?Send)]
+#[allow(clippy::dbg_macro)]
 impl LspCommand for GetDefinition {
     type Response = Vec<LocationLink>;
     type LspRequest = lsp::request::GotoDefinition;
@@ -455,7 +456,7 @@ impl LspCommand for GetDefinition {
         _: &Arc<LanguageServer>,
         _: &AppContext,
     ) -> lsp::GotoDefinitionParams {
-        lsp::GotoDefinitionParams {
+        dbg!(lsp::GotoDefinitionParams {
             text_document_position_params: lsp::TextDocumentPositionParams {
                 text_document: lsp::TextDocumentIdentifier {
                     uri: lsp::Url::from_file_path(path).unwrap(),
@@ -464,7 +465,7 @@ impl LspCommand for GetDefinition {
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
-        }
+        })
     }
 
     async fn response_from_lsp(
@@ -475,18 +476,19 @@ impl LspCommand for GetDefinition {
         server_id: LanguageServerId,
         cx: AsyncAppContext,
     ) -> Result<Vec<LocationLink>> {
+        dbg!(&message);
         location_links_from_lsp(message, lsp_store, buffer, server_id, cx).await
     }
 
     fn to_proto(&self, project_id: u64, buffer: &Buffer) -> proto::GetDefinition {
-        proto::GetDefinition {
+        dbg!(proto::GetDefinition {
             project_id,
             buffer_id: buffer.remote_id().into(),
             position: Some(language::proto::serialize_anchor(
                 &buffer.anchor_before(self.position),
             )),
             version: serialize_version(&buffer.version()),
-        }
+        })
     }
 
     async fn from_proto(

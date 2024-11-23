@@ -28,6 +28,7 @@ pub mod diagnostics_command;
 pub mod docs_command;
 pub mod fetch_command;
 pub mod file_command;
+pub mod lsp_discovery_command;
 pub mod now_command;
 pub mod project_command;
 pub mod prompt_command;
